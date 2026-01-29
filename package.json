@@ -1,0 +1,19 @@
+{
+  "name": "dsa-tracking-platform",
+  "version": "1.0.0",
+  "description": "Company-Wise DSA Question Tracking Platform",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm run build",
+    "start": "npm run start --prefix server"
+  },
+  "keywords": ["dsa", "interview", "tracking", "react", "express", "mongodb"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
