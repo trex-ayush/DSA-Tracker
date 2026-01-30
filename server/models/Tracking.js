@@ -13,11 +13,13 @@ const trackingSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  status: {
-    type: String,
-    required: true,
-    enum: ['solved', 'unsolved', 'revisiting'],
-    default: 'unsolved'
+  isSolved: {
+    type: Boolean,
+    default: false
+  },
+  isRevise: {
+    type: Boolean,
+    default: false
   },
   notes: {
     type: String,
@@ -44,8 +46,8 @@ trackingSchema.index({ user: 1, question: 1 }, { unique: true });
 // Update timestamp on save
 trackingSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
-  // Set solvedAt when status becomes solved
-  if (this.status === 'solved' && !this.solvedAt) {
+  // Set solvedAt when isSolved becomes true
+  if (this.isSolved && !this.solvedAt) {
     this.solvedAt = new Date();
   }
   next();
@@ -62,5 +64,13 @@ trackingSchema.virtual('questionDetails', {
 // Ensure virtuals are included in JSON output
 trackingSchema.set('toJSON', { virtuals: true });
 trackingSchema.set('toObject', { virtuals: true });
+
+// Virtual for status (for backward compatibility)
+trackingSchema.virtual('status').get(function() {
+  if (this.isSolved && this.isRevise) return 'both';
+  if (this.isSolved) return 'solved';
+  if (this.isRevise) return 'revisiting';
+  return 'unsolved';
+});
 
 module.exports = mongoose.model('Tracking', trackingSchema);

@@ -53,6 +53,7 @@ const Navbar = () => {
             <NavLink to="/questions">Questions</NavLink>
             <NavLink to="/companies">Companies</NavLink>
             {user && <NavLink to="/dashboard">Dashboard</NavLink>}
+            {user && <NavLink to="/revise">Revise</NavLink>}
             {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
           </div>
 
@@ -119,9 +120,14 @@ const Navbar = () => {
                 Companies
               </MobileNavLink>
               {user && (
-                <MobileNavLink to="/dashboard" active={isActive('/dashboard')} onClick={() => setMobileMenuOpen(false)}>
-                  Dashboard
-                </MobileNavLink>
+                <>
+                  <MobileNavLink to="/dashboard" active={isActive('/dashboard')} onClick={() => setMobileMenuOpen(false)}>
+                    Dashboard
+                  </MobileNavLink>
+                  <MobileNavLink to="/revise" active={isActive('/revise')} onClick={() => setMobileMenuOpen(false)}>
+                    Revise
+                  </MobileNavLink>
+                </>
               )}
               {user?.role === 'admin' && (
                 <MobileNavLink to="/admin" active={isActive('/admin')} onClick={() => setMobileMenuOpen(false)}>

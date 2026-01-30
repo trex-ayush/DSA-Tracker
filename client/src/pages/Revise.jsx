@@ -1,22 +1,22 @@
 import { useState, useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { questionsAPI, trackingAPI } from '../services/api';
+import { Link } from 'react-router-dom';
+import { trackingAPI, questionsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { 
-  Search, 
-  Loader2, 
-  ArrowLeft, 
-  X, 
-  Building2, 
+import {
+  Search,
+  Loader2,
+  ArrowLeft,
+  X,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
   Star,
   CheckCircle,
   Circle,
+  RotateCcw,
 } from 'lucide-react';
 
 const getDifficultyStyle = (difficulty) => {
@@ -48,73 +48,60 @@ const formatTimeRange = (askedWithin) => {
   }
 };
 
-const Company = () => {
-  const { companyName } = useParams();
+const Revise = () => {
   const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [totalQuestions, setTotalQuestions] = useState(0);
   const [stats, setStats] = useState({ easy: 0, medium: 0, hard: 0 });
   const [trackingMap, setTrackingMap] = useState({});
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
+    company: '',
     timeRange: '',
   });
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 50,
+    total: 0,
     pages: 0
   });
 
-  const decodedCompany = decodeURIComponent(companyName);
-
-  useEffect(() => {
-    fetchCompanyQuestions();
-  }, [decodedCompany, filters, pagination.page]);
-
   useEffect(() => {
     if (user) {
-      fetchUserTracking();
+      fetchRevisingQuestions();
     }
-  }, [user, questions]);
+  }, [user, filters, pagination.page]);
 
-  const fetchCompanyQuestions = async () => {
+  const fetchRevisingQuestions = async () => {
     setLoading(true);
     try {
-      const response = await questionsAPI.getAll({
-        company: decodedCompany,
-        ...filters,
+      const response = await trackingAPI.getAll({
+        isRevise: true,
         page: pagination.page,
         limit: pagination.limit
       });
-      const questionsData = response.data.data || [];
-      setQuestions(questionsData);
-      setTotalQuestions(response.data.pagination?.total || 0);
+      const trackingData = response.data.data || [];
+      setQuestions(trackingData.map(t => t.question).filter(Boolean));
       setPagination(prev => ({
         ...prev,
+        total: response.data.pagination?.total || 0,
         pages: response.data.pagination?.pages || 0
       }));
-      
+
+      // Calculate stats
       const newStats = { easy: 0, medium: 0, hard: 0 };
-      questionsData.forEach(q => {
-        const diff = q.difficulty?.toLowerCase();
-        if (diff in newStats) newStats[diff]++;
+      trackingData.forEach(t => {
+        if (t.question) {
+          const diff = t.question.difficulty?.toLowerCase();
+          if (diff in newStats) newStats[diff]++;
+        }
       });
       setStats(newStats);
-    } catch (error) {
-      console.error('Error fetching company questions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const fetchUserTracking = async () => {
-    try {
-      const response = await trackingAPI.getAll({ limit: 1000 });
-      const tracking = response.data.data || [];
+      // Update tracking map
       const newTrackingMap = {};
-      tracking.forEach(t => {
+      trackingData.forEach(t => {
         newTrackingMap[t.question?._id] = {
           isSolved: t.isSolved,
           isRevise: t.isRevise
@@ -122,7 +109,9 @@ const Company = () => {
       });
       setTrackingMap(newTrackingMap);
     } catch (error) {
-      console.error('Error fetching user tracking:', error);
+      console.error('Error fetching revising questions:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -135,81 +124,97 @@ const Company = () => {
     setFilters({
       search: '',
       difficulty: '',
+      company: '',
       timeRange: '',
     });
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
   const handleSolvedToggle = async (questionId) => {
-    if (!user) {
-      window.location.href = '/login';
-      return;
-    }
-
-    const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
+    const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: true };
     const newIsSolved = !currentTracking.isSolved;
 
     try {
-      await trackingAPI.create(questionId, { isSolved: newIsSolved });
+      await trackingAPI.create(questionId, { isSolved: newIsSolved, isRevise: true });
       setTrackingMap(prev => ({
         ...prev,
         [questionId]: { ...currentTracking, isSolved: newIsSolved }
       }));
+      // Refresh the list if marking as solved
+      if (newIsSolved) {
+        fetchRevisingQuestions();
+      }
     } catch (error) {
       console.error('Error updating solved status:', error);
     }
   };
 
-  const handleReviseToggle = async (questionId) => {
-    if (!user) {
-      window.location.href = '/login';
-      return;
-    }
-
-    const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
-    const newIsRevise = !currentTracking.isRevise;
-
+  const handleRemoveRevise = async (questionId) => {
     try {
-      await trackingAPI.create(questionId, { isRevise: newIsRevise });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isRevise: newIsRevise }
-      }));
+      await trackingAPI.create(questionId, { isRevise: false });
+      fetchRevisingQuestions();
     } catch (error) {
-      console.error('Error updating revise status:', error);
+      console.error('Error removing from revise:', error);
     }
   };
 
-  const hasActiveFilters = filters.difficulty || filters.timeRange || filters.search;
+  // Get unique companies from revising questions
+  const uniqueCompanies = [...new Set(questions.flatMap(q => q.companies?.map(c => c.company) || []))].filter(Boolean).sort();
+  const hasActiveFilters = filters.difficulty || filters.company || filters.search || filters.timeRange;
+
+  // Filter questions based on filters
+  const filteredQuestions = questions.filter(q => {
+    // Search filter
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase();
+      const titleMatch = q.title?.toLowerCase().includes(searchLower);
+      const companyMatch = q.companies?.some(c => c.company?.toLowerCase().includes(searchLower));
+      const topicMatch = q.topics?.some(t => t?.toLowerCase().includes(searchLower));
+      if (!titleMatch && !companyMatch && !topicMatch) return false;
+    }
+    // Difficulty filter
+    if (filters.difficulty && q.difficulty !== filters.difficulty) return false;
+    // Company filter
+    if (filters.company) {
+      const hasCompany = q.companies?.some(c => c.company === filters.company);
+      if (!hasCompany) return false;
+    }
+    // Time range filter
+    if (filters.timeRange) {
+      const hasTimeRange = q.companies?.some(c => c.askedWithin === filters.timeRange);
+      if (!hasTimeRange) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="bg-white">
-      
+
       <main className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Back Button */}
-        <Link to="/companies">
+        <Link to="/">
           <Button variant="ghost" size="sm" className="mb-6 -ml-2 text-gray-600 hover:text-black">
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Companies
+            Back to Home
           </Button>
         </Link>
 
         {/* Header */}
         <div className="mb-8 pb-8 border-b">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-lg bg-black flex items-center justify-center flex-shrink-0">
-              <Building2 className="h-7 w-7 text-white" />
+            <div className="w-14 h-14 rounded-lg bg-yellow-500 flex items-center justify-center flex-shrink-0">
+              <RotateCcw className="h-7 w-7 text-white" />
             </div>
             <div className="flex-1">
               <h1 className="text-2xl md:text-3xl font-bold text-black mb-1">
-                {decodedCompany}
+                Revise Questions
               </h1>
               <p className="text-gray-500">
-                {totalQuestions} interview questions
+                {pagination.total} questions marked for revision
               </p>
             </div>
           </div>
-          
+
           {/* Stats Row */}
           <div className="flex gap-6 mt-6">
             <div className="flex items-center gap-2">
@@ -245,7 +250,22 @@ const Company = () => {
                 onChange={(e) => handleFilterChange('search', e.target.value)}
               />
             </div>
-            
+
+            <Select
+              value={filters.company}
+              onValueChange={(value) => handleFilterChange('company', value === 'all' ? '' : value)}
+            >
+              <SelectTrigger className="w-full sm:w-[180px] border-gray-200">
+                <SelectValue placeholder="Company" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Companies</SelectItem>
+                {uniqueCompanies.map(company => (
+                  <SelectItem key={company} value={company}>{company}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select
               value={filters.difficulty}
               onValueChange={(value) => handleFilterChange('difficulty', value === 'all' ? '' : value)}
@@ -278,8 +298,8 @@ const Company = () => {
             </Select>
 
             {hasActiveFilters && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={clearFilters}
                 className="border-gray-200"
               >
@@ -291,7 +311,7 @@ const Company = () => {
 
           {hasActiveFilters && (
             <p className="text-sm text-gray-500 mt-3">
-              Showing {questions.length} of {totalQuestions} questions
+              Showing {filteredQuestions.length} of {pagination.total} questions
             </p>
           )}
         </div>
@@ -303,20 +323,33 @@ const Company = () => {
               <Loader2 className="h-6 w-6 animate-spin text-gray-400 mb-3" />
               <p className="text-gray-500 text-sm">Loading questions...</p>
             </div>
-          ) : questions.length === 0 ? (
+          ) : filteredQuestions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20">
-              <Search className="h-10 w-10 text-gray-300 mb-4" />
-              <p className="font-medium text-gray-900 mb-1">No questions found</p>
-              <p className="text-sm text-gray-500">Try adjusting your filters</p>
+              <Star className="h-10 w-10 text-gray-300 mb-4" />
+              <p className="font-medium text-gray-900 mb-1">
+                {pagination.total === 0 ? 'No questions to revise' : 'No questions match your filters'}
+              </p>
+              <p className="text-sm text-gray-500 mb-4">
+                {pagination.total === 0
+                  ? 'Mark questions as "Revise" from the Questions or Company pages'
+                  : 'Try adjusting your filters'}
+              </p>
               {hasActiveFilters && (
-                <Button 
-                  variant="outline" 
-                  onClick={clearFilters} 
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
                   className="mt-4"
                   size="sm"
                 >
                   Clear filters
                 </Button>
+              )}
+              {pagination.total === 0 && (
+                <Link to="/questions">
+                  <Button className="mt-4" size="sm">
+                    Browse Questions
+                  </Button>
+                </Link>
               )}
             </div>
           ) : (
@@ -350,22 +383,19 @@ const Company = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {questions.map((question) => {
-                      const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
-                      const companyData = question.companies?.find(c => c.company === decodedCompany);
-                      const otherCompanies = question.companies?.filter(c => c.company !== decodedCompany) || [];
-                      
+                    {filteredQuestions.map((question) => {
+                      const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: true };
+
                       return (
                         <tr key={question._id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-4 text-center">
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isSolved 
-                                  ? 'text-green-500 hover:text-green-600' 
-                                  : 'text-gray-300 hover:text-gray-400'
-                              }`}
-                              title={trackingData.isSolved ? 'Mark as unsolved' : 'Mark as solved'}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                ? 'text-green-500 hover:text-green-600'
+                                : 'text-gray-300 hover:text-gray-400'
+                                }`}
+                              title="Mark as solved"
                             >
                               {trackingData.isSolved ? (
                                 <CheckCircle className="h-5 w-5" />
@@ -376,12 +406,11 @@ const Company = () => {
                           </td>
                           <td className="px-4 py-4 text-center">
                             <button
-                              onClick={() => handleReviseToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isRevise 
-                                  ? 'text-yellow-500 hover:text-yellow-600' 
-                                  : 'text-gray-300 hover:text-gray-400'
-                              }`}
+                              onClick={() => handleRemoveRevise(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                ? 'text-yellow-500 hover:text-yellow-600'
+                                : 'text-gray-300 hover:text-gray-400'
+                                }`}
                               title={trackingData.isRevise ? 'Remove from revise' : 'Add to revise'}
                             >
                               <Star className="h-5 w-5" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
@@ -399,28 +428,29 @@ const Company = () => {
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex flex-wrap gap-1">
-                              <span className="px-2 py-0.5 bg-black text-white rounded text-xs font-medium">
-                                {decodedCompany}
-                              </span>
-                              {otherCompanies.slice(0, 2).map((comp, idx) => (
-                                <span 
-                                  key={idx} 
+                              {question.companies?.slice(0, 3).map((comp, idx) => (
+                                <span
+                                  key={idx}
                                   className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
                                 >
                                   {comp.company}
                                 </span>
                               ))}
-                              {otherCompanies.length > 2 && (
+                              {question.companies?.length > 3 && (
                                 <span className="px-2 py-0.5 text-gray-400 text-xs">
-                                  +{otherCompanies.length - 2}
+                                  +{question.companies.length - 3}
                                 </span>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`text-xs font-medium ${getTimeRangeStyle(companyData?.askedWithin)}`}>
-                              {formatTimeRange(companyData?.askedWithin)}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              {question.companies?.slice(0, 2).map((comp, idx) => (
+                                <span key={idx} className={`text-xs font-medium ${getTimeRangeStyle(comp.askedWithin)}`}>
+                                  {comp.company}: {formatTimeRange(comp.askedWithin)}
+                                </span>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-4 py-4 text-center">
                             <a
@@ -441,11 +471,9 @@ const Company = () => {
 
               {/* Mobile List */}
               <div className="md:hidden divide-y">
-                {questions.map((question) => {
-                  const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
-                  const companyData = question.companies?.find(c => c.company === decodedCompany);
-                  const otherCompanies = question.companies?.filter(c => c.company !== decodedCompany) || [];
-                  
+                {filteredQuestions.map((question) => {
+                  const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: true };
+
                   return (
                     <div key={question._id} className="p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -453,11 +481,10 @@ const Company = () => {
                           <div className="flex items-center gap-2 mb-2">
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isSolved 
-                                  ? 'text-green-500' 
-                                  : 'text-gray-300'
-                              }`}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                ? 'text-green-500'
+                                : 'text-gray-300'
+                                }`}
                             >
                               {trackingData.isSolved ? (
                                 <CheckCircle className="h-4 w-4" />
@@ -466,40 +493,33 @@ const Company = () => {
                               )}
                             </button>
                             <button
-                              onClick={() => handleReviseToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isRevise 
-                                  ? 'text-yellow-500' 
-                                  : 'text-gray-300'
-                              }`}
+                              onClick={() => handleRemoveRevise(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                ? 'text-yellow-500'
+                                : 'text-gray-300'
+                                }`}
                             >
                               <Star className="h-4 w-4" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
                             </button>
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${getDifficultyStyle(question.difficulty)}`}>
                               {question.difficulty}
                             </span>
-                            <span className={`text-xs ${getTimeRangeStyle(companyData?.askedWithin)}`}>
-                              {formatTimeRange(companyData?.askedWithin)}
-                            </span>
                           </div>
                           <h3 className="font-medium text-gray-900 mb-2">
                             {question.title}
                           </h3>
-                          <div className="flex flex-wrap gap-1">
-                            <span className="px-2 py-0.5 bg-black text-white rounded text-xs font-medium">
-                              {decodedCompany}
-                            </span>
-                            {otherCompanies.slice(0, 2).map((comp, idx) => (
-                              <span 
-                                key={idx} 
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {question.companies?.slice(0, 3).map((comp, idx) => (
+                              <span
+                                key={idx}
                                 className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
                               >
                                 {comp.company}
                               </span>
                             ))}
-                            {otherCompanies.length > 2 && (
+                            {question.companies?.length > 3 && (
                               <span className="text-xs text-gray-400">
-                                +{otherCompanies.length - 2}
+                                +{question.companies.length - 3}
                               </span>
                             )}
                           </div>
@@ -556,4 +576,4 @@ const Company = () => {
   );
 };
 
-export default Company;
+export default Revise;

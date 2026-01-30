@@ -9,11 +9,14 @@ const { protect } = require('../middleware/auth');
 // @access  Private
 router.get('/', protect, async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { isSolved, isRevise, page = 1, limit = 20 } = req.query;
     
     const query = { user: req.user._id };
-    if (status) {
-      query.status = status;
+    if (isSolved !== undefined) {
+      query.isSolved = isSolved === 'true';
+    }
+    if (isRevise !== undefined) {
+      query.isRevise = isRevise === 'true';
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -54,9 +57,10 @@ router.get('/stats', protect, async (req, res) => {
     
     const stats = {
       total: tracking.length,
-      solved: tracking.filter(t => t.status === 'solved').length,
-      unsolved: tracking.filter(t => t.status === 'unsolved').length,
-      revisiting: tracking.filter(t => t.status === 'revisiting').length,
+      solved: tracking.filter(t => t.isSolved).length,
+      unsolved: tracking.filter(t => !t.isSolved).length,
+      revising: tracking.filter(t => t.isRevise).length,
+      bothSolvedAndRevise: tracking.filter(t => t.isSolved && t.isRevise).length,
       byDifficulty: {
         Easy: { total: 0, solved: 0 },
         Medium: { total: 0, solved: 0 },
@@ -74,7 +78,7 @@ router.get('/stats', protect, async (req, res) => {
           stats.byDifficulty[difficulty] = { total: 0, solved: 0 };
         }
         stats.byDifficulty[difficulty].total++;
-        if (t.status === 'solved') {
+        if (t.isSolved) {
           stats.byDifficulty[difficulty].solved++;
         }
 
@@ -85,7 +89,7 @@ router.get('/stats', protect, async (req, res) => {
               stats.byCompany[company.company] = { total: 0, solved: 0 };
             }
             stats.byCompany[company.company].total++;
-            if (t.status === 'solved') {
+            if (t.isSolved) {
               stats.byCompany[company.company].solved++;
             }
           }
@@ -94,7 +98,7 @@ router.get('/stats', protect, async (req, res) => {
     }
 
     // Get recently solved questions
-    const recentlySolved = await Tracking.find({ user: req.user._id, status: 'solved' })
+    const recentlySolved = await Tracking.find({ user: req.user._id, isSolved: true })
       .populate('question')
       .sort({ solvedAt: -1 })
       .limit(5);
@@ -116,11 +120,11 @@ router.get('/stats', protect, async (req, res) => {
 });
 
 // @route   POST /api/tracking/:questionId
-// @desc    Create or update tracking for a question
+// @desc    Create or update tracking for a question (toggle isSolved and isRevise independently)
 // @access  Private
 router.post('/:questionId', protect, async (req, res) => {
   try {
-    const { status, notes } = req.body;
+    const { isSolved, isRevise, notes } = req.body;
     const { questionId } = req.params;
 
     // Validate question exists
@@ -140,10 +144,19 @@ router.post('/:questionId', protect, async (req, res) => {
 
     if (tracking) {
       // Update existing tracking
-      tracking.status = status || tracking.status;
-      tracking.notes = notes !== undefined ? notes : tracking.notes;
-      if (status === 'solved') {
-        tracking.solvedAt = new Date();
+      if (isSolved !== undefined) {
+        tracking.isSolved = isSolved;
+        if (isSolved) {
+          tracking.solvedAt = new Date();
+        } else {
+          tracking.solvedAt = null;
+        }
+      }
+      if (isRevise !== undefined) {
+        tracking.isRevise = isRevise;
+      }
+      if (notes !== undefined) {
+        tracking.notes = notes;
       }
       tracking = await tracking.save();
     } else {
@@ -151,9 +164,10 @@ router.post('/:questionId', protect, async (req, res) => {
       tracking = await Tracking.create({
         user: req.user._id,
         question: questionId,
-        status: status || 'unsolved',
+        isSolved: isSolved || false,
+        isRevise: isRevise || false,
         notes: notes || null,
-        solvedAt: status === 'solved' ? new Date() : null
+        solvedAt: isSolved ? new Date() : null
       });
     }
 
@@ -172,20 +186,28 @@ router.post('/:questionId', protect, async (req, res) => {
 });
 
 // @route   PUT /api/tracking/:questionId
-// @desc    Update tracking status for a question
+// @desc    Update tracking status for a question (legacy support - updated for new schema)
 // @access  Private
 router.put('/:questionId', protect, async (req, res) => {
   try {
-    const { status, notes } = req.body;
+    const { isSolved, isRevise, notes } = req.body;
     const { questionId } = req.params;
+
+    const updateData = {};
+    if (isSolved !== undefined) {
+      updateData.isSolved = isSolved;
+      updateData.solvedAt = isSolved ? new Date() : null;
+    }
+    if (isRevise !== undefined) {
+      updateData.isRevise = isRevise;
+    }
+    if (notes !== undefined) {
+      updateData.notes = notes;
+    }
 
     const tracking = await Tracking.findOneAndUpdate(
       { user: req.user._id, question: questionId },
-      { 
-        status, 
-        notes,
-        solvedAt: status === 'solved' ? new Date() : undefined
-      },
+      updateData,
       { new: true }
     );
 
