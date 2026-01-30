@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -50,10 +51,31 @@ const PublicRoute = ({ children }) => {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/companies" element={<Companies />} />
-      <Route path="/questions" element={<Questions />} />
-      <Route path="/company/:companyName" element={<Company />} />
+      {/* Routes with Navbar (Layout) */}
+      <Route element={<Layout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/companies" element={<Companies />} />
+        <Route path="/questions" element={<Questions />} />
+        <Route path="/company/:companyName" element={<Company />} />
+        <Route 
+          path="/dashboard" 
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin" 
+          element={
+            <ProtectedRoute>
+              <Admin />
+            </ProtectedRoute>
+          } 
+        />
+      </Route>
+
+      {/* Routes without Navbar */}
       <Route 
         path="/login" 
         element={
@@ -68,22 +90,6 @@ function AppRoutes() {
           <PublicRoute>
             <Register />
           </PublicRoute>
-        } 
-      />
-      <Route 
-        path="/dashboard" 
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } 
-      />
-      <Route 
-        path="/admin" 
-        element={
-          <ProtectedRoute>
-            <Admin />
-          </ProtectedRoute>
         } 
       />
       <Route path="*" element={<Navigate to="/" replace />} />

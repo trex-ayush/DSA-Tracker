@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -78,8 +77,7 @@ const Admin = () => {
   // Check if user is admin
   if (user?.role !== 'admin') {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Navbar />
+      <div className="bg-gray-50">
         <div className="container mx-auto px-4 py-8">
           <Card className="max-w-md mx-auto">
             <CardContent className="pt-6 text-center">
@@ -96,8 +94,7 @@ const Admin = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
+    <div className="bg-gray-50">
       
       <main className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold mb-8">Admin Dashboard</h1>
