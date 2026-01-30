@@ -53,12 +53,14 @@ const authRoutes = require('./routes/auth');
 const questionRoutes = require('./routes/questions');
 const trackingRoutes = require('./routes/tracking');
 const adminRoutes = require('./routes/admin');
+const requestsRoutes = require('./routes/requests');
 const debugRoutes = require('./routes/debug');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/questions', questionRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/requests', requestsRoutes);
 app.use('/api/debug', debugRoutes);
 
 // Health check route

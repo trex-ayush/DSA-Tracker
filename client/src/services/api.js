@@ -107,4 +107,11 @@ export const trackingAPI = {
   },
 };
 
+export const requestsAPI = {
+  getAll: () => api.get('/requests'),
+  create: (data) => api.post('/requests', data),
+  addMessage: (id, data) => api.post(`/requests/${id}/message`, data),
+  updateStatus: (id, data) => api.put(`/requests/${id}/status`, data),
+};
+
 export default api;
