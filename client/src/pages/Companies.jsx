@@ -1,45 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { questionsAPI } from '../services/api';
 
 const Companies = () => {
   const navigate = useNavigate();
-  const [companies, setCompanies] = useState([]);
-  const [companyCounts, setCompanyCounts] = useState({});
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchCompanies();
-    fetchCompanyCounts();
-  }, []);
+  // Query: Companies (Shared with Home.jsx)
+  const { data: companiesData, isLoading: loadingCompanies } = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => questionsAPI.getCompanies(),
+    staleTime: 60 * 60 * 1000,
+  });
 
-  const fetchCompanies = async () => {
-    try {
-      const response = await questionsAPI.getCompanies();
-      setCompanies(response.data.data);
-    } catch (error) {
-      console.error('Error fetching companies:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const companies = companiesData?.data?.data || [];
 
-  const fetchCompanyCounts = async () => {
-    try {
+  // Query: Company Counts (Shared with Home.jsx)
+  const { data: companyCountsData, isLoading: loadingCounts } = useQuery({
+    queryKey: ['companyCounts'],
+    queryFn: async () => {
       const response = await fetch('/api/questions/company-stats');
-      const data = await response.json();
-      if (data.success) {
-        setCompanyCounts(data.data.counts || {});
-      }
-    } catch (error) {
-      console.error('Error fetching company counts:', error);
-    }
-  };
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const filteredCompanies = companies
-    .filter(c => c.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (companyCounts[b] || 0) - (companyCounts[a] || 0));
+  const companyCounts = companyCountsData?.success ? companyCountsData.data.counts : {};
+  const loading = loadingCompanies || loadingCounts;
+
+  const filteredCompanies = useMemo(() => {
+    return companies
+      .filter(c => c.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => (companyCounts[b] || 0) - (companyCounts[a] || 0));
+  }, [companies, search, companyCounts]);
 
   return (
     <div className="bg-white">

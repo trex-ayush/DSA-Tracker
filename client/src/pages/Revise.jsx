@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { trackingAPI, questionsAPI } from '../services/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { trackingAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -50,10 +51,7 @@ const formatTimeRange = (askedWithin) => {
 
 const Revise = () => {
   const { user } = useAuth();
-  const [questions, setQuestions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ easy: 0, medium: 0, hard: 0 });
-  const [trackingMap, setTrackingMap] = useState({});
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
@@ -67,53 +65,58 @@ const Revise = () => {
     pages: 0
   });
 
-  useEffect(() => {
-    if (user) {
-      fetchRevisingQuestions();
-    }
-  }, [user, filters, pagination.page]);
+  // Query: Revising Questions
+  const { data: reviseData, isLoading: loading } = useQuery({
+    queryKey: ['reviseTracking', user?._id, pagination.page],
+    queryFn: () => trackingAPI.getAll({
+      isRevise: true,
+      page: pagination.page,
+      limit: pagination.limit
+    }),
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+  });
 
-  const fetchRevisingQuestions = async () => {
-    setLoading(true);
-    try {
-      const response = await trackingAPI.getAll({
-        isRevise: true,
-        page: pagination.page,
-        limit: pagination.limit
-      });
-      const trackingData = response.data.data || [];
-      setQuestions(trackingData.map(t => t.question).filter(Boolean));
+  const trackingData = reviseData?.data?.data || [];
+  const questions = trackingData.map(t => t.question).filter(Boolean);
+
+  // Sync pagination
+  useEffect(() => {
+    if (reviseData?.data?.pagination) {
       setPagination(prev => ({
         ...prev,
-        total: response.data.pagination?.total || 0,
-        pages: response.data.pagination?.pages || 0
+        total: reviseData.data.pagination.total || 0,
+        pages: reviseData.data.pagination.pages || 0
       }));
+    }
+  }, [reviseData]);
 
-      // Calculate stats
-      const newStats = { easy: 0, medium: 0, hard: 0 };
-      trackingData.forEach(t => {
-        if (t.question) {
-          const diff = t.question.difficulty?.toLowerCase();
-          if (diff in newStats) newStats[diff]++;
-        }
-      });
-      setStats(newStats);
-
-      // Update tracking map
-      const newTrackingMap = {};
-      trackingData.forEach(t => {
-        newTrackingMap[t.question?._id] = {
+  // Derived tracking map
+  const trackingMap = useMemo(() => {
+    const map = {};
+    trackingData.forEach(t => {
+      if (t.question) {
+        map[t.question._id] = {
           isSolved: t.isSolved,
           isRevise: t.isRevise
         };
-      });
-      setTrackingMap(newTrackingMap);
-    } catch (error) {
-      console.error('Error fetching revising questions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      }
+    });
+    return map;
+  }, [trackingData]);
+
+  // Calculate Stats
+  const stats = useMemo(() => {
+    const newStats = { easy: 0, medium: 0, hard: 0 };
+    trackingData.forEach(t => {
+      if (t.question) {
+        const diff = t.question.difficulty?.toLowerCase();
+        if (diff in newStats) newStats[diff]++;
+      }
+    });
+    return newStats;
+  }, [trackingData]);
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -130,31 +133,77 @@ const Revise = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
+  // Helper to update both 'reviseTracking' AND 'userTracking' (Questions map)
+  const updateCache = (questionId, updates) => {
+    // 1. Update userTracking (Questions page)
+    queryClient.setQueryData(['userTracking', user?._id], (oldData) => {
+      if (!oldData?.data?.data) return oldData;
+      const newData = { ...oldData };
+      const list = [...newData.data.data];
+      const idx = list.findIndex(t => t?.question?._id === questionId);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...updates };
+      }
+      newData.data.data = list;
+      return newData;
+    });
+
+    // 2. Update reviseTracking (This page)
+    queryClient.setQueryData(['reviseTracking', user?._id, pagination.page], (oldData) => {
+      if (!oldData?.data?.data) return oldData;
+      const newData = { ...oldData };
+      let list = [...newData.data.data];
+      const idx = list.findIndex(t => t?.question?._id === questionId);
+
+      if (idx !== -1) {
+        // For remove revise, we might want to remove it from list?
+        // But optimistic updates usually just update state.
+        // If we remove it here, it vanishes instantly.
+        if (updates.isRevise === false) {
+          // Option A: Remove instantly
+          // list = list.filter(t => t.question._id !== questionId);
+          // Option B: Just update state (will vanish on refetch or filter)
+          list[idx] = { ...list[idx], ...updates };
+        } else {
+          list[idx] = { ...list[idx], ...updates };
+        }
+      }
+      newData.data.data = list;
+      return newData;
+    });
+  };
+
   const handleSolvedToggle = async (questionId) => {
     const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: true };
     const newIsSolved = !currentTracking.isSolved;
 
+    updateCache(questionId, { isSolved: newIsSolved });
+
     try {
       await trackingAPI.create(questionId, { isSolved: newIsSolved, isRevise: true });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isSolved: newIsSolved }
-      }));
-      // Refresh the list if marking as solved
-      if (newIsSolved) {
-        fetchRevisingQuestions();
-      }
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error updating solved status:', error);
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     }
   };
 
   const handleRemoveRevise = async (questionId) => {
+    const currentTracking = trackingMap[questionId];
+
+    // Optimistic Update
+    updateCache(questionId, { isRevise: false });
+
     try {
       await trackingAPI.create(questionId, { isRevise: false });
-      fetchRevisingQuestions();
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error removing from revise:', error);
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     }
   };
 
@@ -318,7 +367,7 @@ const Revise = () => {
 
         {/* Questions Table */}
         <div className="border rounded-lg overflow-hidden">
-          {loading ? (
+          {loading && !reviseData ? (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="h-6 w-6 animate-spin text-gray-400 mb-3" />
               <p className="text-gray-500 text-sm">Loading questions...</p>

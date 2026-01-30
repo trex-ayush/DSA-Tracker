@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { questionsAPI, trackingAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { debounce } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -50,11 +52,8 @@ const formatTimeRange = (askedWithin) => {
 
 const Questions = () => {
   const { user } = useAuth();
-  const [questions, setQuestions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [allQuestions, setAllQuestions] = useState([]);
-  const [stats, setStats] = useState({ easy: 0, medium: 0, hard: 0 });
-  const [trackingMap, setTrackingMap] = useState({});
+  const queryClient = useQueryClient();
+  const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
@@ -68,73 +67,85 @@ const Questions = () => {
     pages: 0
   });
 
-  useEffect(() => {
-    fetchAllQuestions();
-  }, []);
+  // Debounced search - updates filters.search after 300ms of no typing
+  const debouncedSearch = useMemo(
+    () => debounce((value) => {
+      setFilters(prev => ({ ...prev, search: value }));
+      setPagination(prev => ({ ...prev, page: 1 }));
+    }, 300),
+    []
+  );
 
-  useEffect(() => {
-    fetchQuestions();
-  }, [filters, pagination.page]);
-
-  useEffect(() => {
-    if (user) {
-      fetchUserTracking();
-    }
-  }, [user, questions]);
-
-  const fetchAllQuestions = async () => {
-    try {
-      const response = await questionsAPI.getAll({ limit: 1000 });
-      setAllQuestions(response.data.data || []);
-
-      const newStats = { easy: 0, medium: 0, hard: 0 };
-      (response.data.data || []).forEach(q => {
-        const diff = q.difficulty?.toLowerCase();
-        if (diff in newStats) newStats[diff]++;
-      });
-      setStats(newStats);
-    } catch (error) {
-      console.error('Error fetching all questions:', error);
-    }
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    debouncedSearch(value);
   };
 
-  const fetchQuestions = async () => {
-    setLoading(true);
-    try {
-      const response = await questionsAPI.getAll({
-        ...filters,
-        page: pagination.page,
-        limit: pagination.limit
-      });
-      setQuestions(response.data.data || []);
+  // Query: Stats
+  const { data: statsData } = useQuery({
+    queryKey: ['questionsStats'],
+    queryFn: () => questionsAPI.getStats(),
+    select: (res) => {
+      const data = res.data.data;
+      return {
+        easy: data.byDifficulty?.Easy || 0,
+        medium: data.byDifficulty?.Medium || 0,
+        hard: data.byDifficulty?.Hard || 0
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const stats = statsData || { easy: 0, medium: 0, hard: 0 };
+
+  // Query: Questions
+  const { data: questionsData, isLoading: loading } = useQuery({
+    queryKey: ['questions', filters, pagination.page],
+    queryFn: () => questionsAPI.getAll({
+      ...filters,
+      page: pagination.page,
+      limit: pagination.limit
+    }),
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+  });
+
+  const questions = questionsData?.data?.data || [];
+
+  // Update pagination total when questions data arrives
+  useEffect(() => {
+    if (questionsData?.data?.pagination) {
       setPagination(prev => ({
         ...prev,
-        total: response.data.pagination?.total || 0,
-        pages: response.data.pagination?.pages || 0
+        total: questionsData.data.pagination.total || 0,
+        pages: questionsData.data.pagination.pages || 0
       }));
-    } catch (error) {
-      console.error('Error fetching questions:', error);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [questionsData]);
 
-  const fetchUserTracking = async () => {
-    try {
-      const response = await trackingAPI.getAll({ limit: 1000 });
-      const tracking = response.data.data || [];
-      const newTrackingMap = {};
-      tracking.forEach(t => {
-        newTrackingMap[t.question?._id] = {
-          isSolved: t.isSolved,
-          isRevise: t.isRevise
-        };
+  // Query: User Tracking
+  const { data: trackingData } = useQuery({
+    queryKey: ['userTracking', user?._id],
+    queryFn: () => trackingAPI.getAll({ limit: 1000 }),
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const trackingMap = useMemo(() => {
+    const map = {};
+    if (trackingData?.data?.data) {
+      trackingData.data.data.forEach(t => {
+        if (t.question) {
+          map[t.question._id] = {
+            isSolved: t.isSolved,
+            isRevise: t.isRevise
+          };
+        }
       });
-      setTrackingMap(newTrackingMap);
-    } catch (error) {
-      console.error('Error fetching user tracking:', error);
     }
-  };
+    return map;
+  }, [trackingData]);
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -151,6 +162,29 @@ const Questions = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
+  // Helper to optimistically update cache
+  const updateTrackingCache = (questionId, updates) => {
+    queryClient.setQueryData(['userTracking', user?._id], (oldData) => {
+      if (!oldData?.data?.data) return oldData;
+
+      const newData = { ...oldData };
+      const trackingList = [...newData.data.data];
+      const index = trackingList.findIndex(t => t.question?._id === questionId);
+
+      if (index !== -1) {
+        trackingList[index] = { ...trackingList[index], ...updates };
+      } else {
+        trackingList.push({
+          question: { _id: questionId },
+          ...updates
+        });
+      }
+
+      newData.data.data = trackingList;
+      return newData;
+    });
+  };
+
   const handleSolvedToggle = async (questionId) => {
     if (!user) {
       window.location.href = '/login';
@@ -160,14 +194,19 @@ const Questions = () => {
     const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
     const newIsSolved = !currentTracking.isSolved;
 
+    // Optimistic Update
+    updateTrackingCache(questionId, { isSolved: newIsSolved });
+
     try {
       await trackingAPI.create(questionId, { isSolved: newIsSolved });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isSolved: newIsSolved }
-      }));
+      // Invalidate to ensure consistency eventually
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error updating solved status:', error);
+      // Revert/Refetch
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     }
   };
 
@@ -180,19 +219,23 @@ const Questions = () => {
     const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
     const newIsRevise = !currentTracking.isRevise;
 
+    // Optimistic Update
+    updateTrackingCache(questionId, { isRevise: newIsRevise });
+
     try {
       await trackingAPI.create(questionId, { isRevise: newIsRevise });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isRevise: newIsRevise }
-      }));
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error updating revise status:', error);
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     }
   };
 
-  const uniqueCompanies = [...new Set(allQuestions.flatMap(q => q.companies?.map(c => c.company) || []))].filter(Boolean).sort();
-  const hasActiveFilters = filters.difficulty || filters.timeRange || filters.search || filters.company;
+  // Get companies from current questions (or use the ones shown in filters)
+  const uniqueCompanies = [...new Set(questions.flatMap(q => q.companies?.map(c => c.company) || []))].filter(Boolean).sort();
+  const hasActiveFilters = filters.difficulty || filters.timeRange || searchInput || filters.company;
 
   return (
     <div className="bg-white">
@@ -217,7 +260,7 @@ const Questions = () => {
                 All Questions
               </h1>
               <p className="text-gray-500">
-                Browse {pagination.total || allQuestions.length} interview questions
+                Browse {pagination.total} interview questions
               </p>
             </div>
           </div>
@@ -253,8 +296,8 @@ const Questions = () => {
               <Input
                 placeholder="Search questions..."
                 className="pl-10 border-gray-200 focus:border-black focus:ring-black"
-                value={filters.search}
-                onChange={(e) => handleFilterChange('search', e.target.value)}
+                value={searchInput}
+                onChange={handleSearchChange}
               />
             </div>
 
@@ -318,14 +361,14 @@ const Questions = () => {
 
           {hasActiveFilters && (
             <p className="text-sm text-gray-500 mt-3">
-              Showing {questions.length} of {pagination.total} questions
+              Showing {pagination.total} questions
             </p>
           )}
         </div>
 
         {/* Questions Table */}
         <div className="border rounded-lg overflow-hidden">
-          {loading ? (
+          {loading && !questions.length ? (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="h-6 w-6 animate-spin text-gray-400 mb-3" />
               <p className="text-gray-500 text-sm">Loading questions...</p>
@@ -333,13 +376,16 @@ const Questions = () => {
           ) : questions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20">
               <Search className="h-10 w-10 text-gray-300 mb-4" />
-              <p className="font-medium text-gray-900 mb-1">No questions found</p>
-              <p className="text-sm text-gray-500">Try adjusting your filters</p>
+              <p className="font-medium text-gray-900 mb-1">
+                No questions found
+              </p>
+              <p className="text-sm text-gray-500 mb-4">
+                Try adjusting your search or filters
+              </p>
               {hasActiveFilters && (
                 <Button
                   variant="outline"
                   onClick={clearFilters}
-                  className="mt-4"
                   size="sm"
                 >
                   Clear filters
@@ -354,10 +400,10 @@ const Questions = () => {
                   <thead>
                     <tr className="border-b bg-gray-50">
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
-                        ✓
+                        Status
                       </th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
-                        ★
+                        Revise
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Title
@@ -379,17 +425,17 @@ const Questions = () => {
                   <tbody className="divide-y divide-gray-100">
                     {questions.map((question) => {
                       const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
-                      const trackingStatus = trackingData.isSolved ? 'solved' : (trackingData.isRevise ? 'revisiting' : 'unsolved');
+
                       return (
                         <tr key={question._id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-4 text-center">
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
                               className={`p-1 rounded-md transition-colors ${trackingData.isSolved
-                                  ? 'text-green-500 hover:text-green-600'
-                                  : 'text-gray-300 hover:text-gray-400'
+                                ? 'text-green-500 hover:text-green-600'
+                                : 'text-gray-300 hover:text-gray-400'
                                 }`}
-                              title={trackingData.isSolved ? 'Mark as unsolved' : 'Mark as solved'}
+                              title="Mark as solved"
                             >
                               {trackingData.isSolved ? (
                                 <CheckCircle className="h-5 w-5" />
@@ -402,10 +448,10 @@ const Questions = () => {
                             <button
                               onClick={() => handleReviseToggle(question._id)}
                               className={`p-1 rounded-md transition-colors ${trackingData.isRevise
-                                  ? 'text-yellow-500 hover:text-yellow-600'
-                                  : 'text-gray-300 hover:text-gray-400'
+                                ? 'text-yellow-500 hover:text-yellow-600'
+                                : 'text-gray-300 hover:text-gray-400'
                                 }`}
-                              title={trackingData.isRevise ? 'Remove from revise' : 'Add to revise'}
+                              title="Mark for revision"
                             >
                               <Star className="h-5 w-5" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
                             </button>
@@ -467,6 +513,7 @@ const Questions = () => {
               <div className="md:hidden divide-y">
                 {questions.map((question) => {
                   const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
+
                   return (
                     <div key={question._id} className="p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -475,8 +522,8 @@ const Questions = () => {
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
                               className={`p-1 rounded-md transition-colors ${trackingData.isSolved
-                                  ? 'text-green-500'
-                                  : 'text-gray-300'
+                                ? 'text-green-500'
+                                : 'text-gray-300'
                                 }`}
                             >
                               {trackingData.isSolved ? (
@@ -488,8 +535,8 @@ const Questions = () => {
                             <button
                               onClick={() => handleReviseToggle(question._id)}
                               className={`p-1 rounded-md transition-colors ${trackingData.isRevise
-                                  ? 'text-yellow-500'
-                                  : 'text-gray-300'
+                                ? 'text-yellow-500'
+                                : 'text-gray-300'
                                 }`}
                             >
                               <Star className="h-4 w-4" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
@@ -534,7 +581,7 @@ const Questions = () => {
           )}
         </div>
 
-        {/* Pagination */}
+        {/* Pagination - only show if there are pages */}
         {pagination.pages > 1 && (
           <div className="flex items-center justify-between mt-6">
             <p className="text-sm text-gray-500">

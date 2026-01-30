@@ -1,16 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { questionsAPI, trackingAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { 
-  Search, 
-  Loader2, 
-  ArrowLeft, 
-  X, 
-  Building2, 
+import {
+  Search,
+  Loader2,
+  ArrowLeft,
+  X,
+  Building2,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
@@ -50,12 +51,10 @@ const formatTimeRange = (askedWithin) => {
 
 const Company = () => {
   const { companyName } = useParams();
+  const decodedCompany = decodeURIComponent(companyName);
   const { user } = useAuth();
-  const [questions, setQuestions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [totalQuestions, setTotalQuestions] = useState(0);
-  const [stats, setStats] = useState({ easy: 0, medium: 0, hard: 0 });
-  const [trackingMap, setTrackingMap] = useState({});
+  const queryClient = useQueryClient();
+
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
@@ -64,67 +63,56 @@ const Company = () => {
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 50,
-    pages: 0
   });
 
-  const decodedCompany = decodeURIComponent(companyName);
+  // Query: Company Questions
+  const { data: questionsData, isLoading: loadingQuestions } = useQuery({
+    queryKey: ['company', decodedCompany, filters, pagination.page],
+    queryFn: () => questionsAPI.getAll({
+      company: decodedCompany,
+      ...filters,
+      page: pagination.page,
+      limit: pagination.limit
+    }),
+    staleTime: 5 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    fetchCompanyQuestions();
-  }, [decodedCompany, filters, pagination.page]);
+  const questions = questionsData?.data?.data || [];
+  const totalQuestions = questionsData?.data?.pagination?.total || 0;
+  const totalPages = questionsData?.data?.pagination?.pages || 0;
 
-  useEffect(() => {
-    if (user) {
-      fetchUserTracking();
-    }
-  }, [user, questions]);
+  // Stats calculation
+  const stats = useMemo(() => {
+    const newStats = { easy: 0, medium: 0, hard: 0 };
+    questions.forEach(q => {
+      const diff = q.difficulty?.toLowerCase();
+      if (diff in newStats) newStats[diff]++;
+    });
+    return newStats;
+  }, [questions]);
 
-  const fetchCompanyQuestions = async () => {
-    setLoading(true);
-    try {
-      const response = await questionsAPI.getAll({
-        company: decodedCompany,
-        ...filters,
-        page: pagination.page,
-        limit: pagination.limit
+  // Query: User Tracking (Shared with Questions.jsx)
+  const { data: trackingData } = useQuery({
+    queryKey: ['userTracking', user?._id],
+    queryFn: () => trackingAPI.getAll(), // Fetch all to match Questions.jsx
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const trackingMap = useMemo(() => {
+    const map = {};
+    if (trackingData?.data?.data) {
+      trackingData.data.data.forEach(t => {
+        if (t.question) {
+          map[t.question._id] = {
+            isSolved: t.isSolved,
+            isRevise: t.isRevise
+          };
+        }
       });
-      const questionsData = response.data.data || [];
-      setQuestions(questionsData);
-      setTotalQuestions(response.data.pagination?.total || 0);
-      setPagination(prev => ({
-        ...prev,
-        pages: response.data.pagination?.pages || 0
-      }));
-      
-      const newStats = { easy: 0, medium: 0, hard: 0 };
-      questionsData.forEach(q => {
-        const diff = q.difficulty?.toLowerCase();
-        if (diff in newStats) newStats[diff]++;
-      });
-      setStats(newStats);
-    } catch (error) {
-      console.error('Error fetching company questions:', error);
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const fetchUserTracking = async () => {
-    try {
-      const response = await trackingAPI.getAll({ limit: 1000 });
-      const tracking = response.data.data || [];
-      const newTrackingMap = {};
-      tracking.forEach(t => {
-        newTrackingMap[t.question?._id] = {
-          isSolved: t.isSolved,
-          isRevise: t.isRevise
-        };
-      });
-      setTrackingMap(newTrackingMap);
-    } catch (error) {
-      console.error('Error fetching user tracking:', error);
-    }
-  };
+    return map;
+  }, [trackingData]);
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -140,6 +128,30 @@ const Company = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
+  // Optimistic updates helper
+  const updateTrackingCache = (questionId, updates) => {
+    queryClient.setQueryData(['userTracking', user?._id], (oldData) => {
+      if (!oldData?.data?.data) return oldData;
+      const newData = { ...oldData };
+      const list = [...newData.data.data];
+      const idx = list.findIndex(t => t?.question?._id === questionId);
+
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...updates };
+      } else {
+        // If not found (e.g. was never interact with), we might need to add it?
+        // But trackingAPI.getAll returns existing tracking. 
+        // If we just clicked it, we are creating it.
+        // For simplicity, we might not optimistically ADD if it's complex structure, 
+        // but let's try to update if it exists or doing nothing (invalidation will fix it).
+        // Actually, if it's new, we can't easily optimistic update without full object structure.
+        // So we might skip optimistic ADD for now, or just handle existing.
+      }
+      newData.data.data = list;
+      return newData;
+    });
+  };
+
   const handleSolvedToggle = async (questionId) => {
     if (!user) {
       window.location.href = '/login';
@@ -149,12 +161,15 @@ const Company = () => {
     const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
     const newIsSolved = !currentTracking.isSolved;
 
+    // We can try to optimistic update if we know it exists in cache, 
+    // but if it's a new tracking record, it's safer to just rely on invalidation or simple local state if we had it.
+    // However, since we share cache, we should try invalidation primarily for correctness on new records.
+
     try {
       await trackingAPI.create(questionId, { isSolved: newIsSolved });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isSolved: newIsSolved }
-      }));
+      // Invalidate everything to be consistent
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error updating solved status:', error);
     }
@@ -171,10 +186,8 @@ const Company = () => {
 
     try {
       await trackingAPI.create(questionId, { isRevise: newIsRevise });
-      setTrackingMap(prev => ({
-        ...prev,
-        [questionId]: { ...currentTracking, isRevise: newIsRevise }
-      }));
+      queryClient.invalidateQueries(['userTracking']);
+      queryClient.invalidateQueries(['reviseTracking']);
     } catch (error) {
       console.error('Error updating revise status:', error);
     }
@@ -184,7 +197,7 @@ const Company = () => {
 
   return (
     <div className="bg-white">
-      
+
       <main className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Back Button */}
         <Link to="/companies">
@@ -209,7 +222,7 @@ const Company = () => {
               </p>
             </div>
           </div>
-          
+
           {/* Stats Row */}
           <div className="flex gap-6 mt-6">
             <div className="flex items-center gap-2">
@@ -245,7 +258,7 @@ const Company = () => {
                 onChange={(e) => handleFilterChange('search', e.target.value)}
               />
             </div>
-            
+
             <Select
               value={filters.difficulty}
               onValueChange={(value) => handleFilterChange('difficulty', value === 'all' ? '' : value)}
@@ -278,8 +291,8 @@ const Company = () => {
             </Select>
 
             {hasActiveFilters && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={clearFilters}
                 className="border-gray-200"
               >
@@ -298,7 +311,7 @@ const Company = () => {
 
         {/* Questions Table */}
         <div className="border rounded-lg overflow-hidden">
-          {loading ? (
+          {loadingQuestions ? (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="h-6 w-6 animate-spin text-gray-400 mb-3" />
               <p className="text-gray-500 text-sm">Loading questions...</p>
@@ -309,9 +322,9 @@ const Company = () => {
               <p className="font-medium text-gray-900 mb-1">No questions found</p>
               <p className="text-sm text-gray-500">Try adjusting your filters</p>
               {hasActiveFilters && (
-                <Button 
-                  variant="outline" 
-                  onClick={clearFilters} 
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
                   className="mt-4"
                   size="sm"
                 >
@@ -354,17 +367,16 @@ const Company = () => {
                       const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
                       const companyData = question.companies?.find(c => c.company === decodedCompany);
                       const otherCompanies = question.companies?.filter(c => c.company !== decodedCompany) || [];
-                      
+
                       return (
                         <tr key={question._id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-4 text-center">
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isSolved 
-                                  ? 'text-green-500 hover:text-green-600' 
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                  ? 'text-green-500 hover:text-green-600'
                                   : 'text-gray-300 hover:text-gray-400'
-                              }`}
+                                }`}
                               title={trackingData.isSolved ? 'Mark as unsolved' : 'Mark as solved'}
                             >
                               {trackingData.isSolved ? (
@@ -377,11 +389,10 @@ const Company = () => {
                           <td className="px-4 py-4 text-center">
                             <button
                               onClick={() => handleReviseToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isRevise 
-                                  ? 'text-yellow-500 hover:text-yellow-600' 
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                  ? 'text-yellow-500 hover:text-yellow-600'
                                   : 'text-gray-300 hover:text-gray-400'
-                              }`}
+                                }`}
                               title={trackingData.isRevise ? 'Remove from revise' : 'Add to revise'}
                             >
                               <Star className="h-5 w-5" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
@@ -403,8 +414,8 @@ const Company = () => {
                                 {decodedCompany}
                               </span>
                               {otherCompanies.slice(0, 2).map((comp, idx) => (
-                                <span 
-                                  key={idx} 
+                                <span
+                                  key={idx}
                                   className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
                                 >
                                   {comp.company}
@@ -445,7 +456,7 @@ const Company = () => {
                   const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
                   const companyData = question.companies?.find(c => c.company === decodedCompany);
                   const otherCompanies = question.companies?.filter(c => c.company !== decodedCompany) || [];
-                  
+
                   return (
                     <div key={question._id} className="p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -453,11 +464,10 @@ const Company = () => {
                           <div className="flex items-center gap-2 mb-2">
                             <button
                               onClick={() => handleSolvedToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isSolved 
-                                  ? 'text-green-500' 
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                  ? 'text-green-500'
                                   : 'text-gray-300'
-                              }`}
+                                }`}
                             >
                               {trackingData.isSolved ? (
                                 <CheckCircle className="h-4 w-4" />
@@ -467,11 +477,10 @@ const Company = () => {
                             </button>
                             <button
                               onClick={() => handleReviseToggle(question._id)}
-                              className={`p-1 rounded-md transition-colors ${
-                                trackingData.isRevise 
-                                  ? 'text-yellow-500' 
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                  ? 'text-yellow-500'
                                   : 'text-gray-300'
-                              }`}
+                                }`}
                             >
                               <Star className="h-4 w-4" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
                             </button>
@@ -490,8 +499,8 @@ const Company = () => {
                               {decodedCompany}
                             </span>
                             {otherCompanies.slice(0, 2).map((comp, idx) => (
-                              <span 
-                                key={idx} 
+                              <span
+                                key={idx}
                                 className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
                               >
                                 {comp.company}
@@ -522,10 +531,10 @@ const Company = () => {
         </div>
 
         {/* Pagination */}
-        {pagination.pages > 1 && (
+        {totalPages > 1 && (
           <div className="flex items-center justify-between mt-6">
             <p className="text-sm text-gray-500">
-              Page {pagination.page} of {pagination.pages}
+              Page {pagination.page} of {totalPages}
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -542,7 +551,7 @@ const Company = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
-                disabled={pagination.page === pagination.pages}
+                disabled={pagination.page === totalPages}
                 className="border-gray-200"
               >
                 Next

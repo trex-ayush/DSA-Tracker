@@ -10,7 +10,7 @@ const { protect } = require('../middleware/auth');
 router.get('/', protect, async (req, res) => {
   try {
     const { isSolved, isRevise, page = 1, limit = 20 } = req.query;
-    
+
     const query = { user: req.user._id };
     if (isSolved !== undefined) {
       query.isSolved = isSolved === 'true';
@@ -20,11 +20,18 @@ router.get('/', protect, async (req, res) => {
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Use slim population if requested (only essential question fields)
+    const populateFields = req.query.slim === 'true'
+      ? 'title difficulty link'
+      : '';
+
     const tracking = await Tracking.find(query)
-      .populate('question')
+      .populate('question', populateFields || undefined)
       .sort({ updatedAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
     const total = await Tracking.countDocuments(query);
 
@@ -53,8 +60,8 @@ router.get('/', protect, async (req, res) => {
 // @access  Private
 router.get('/stats', protect, async (req, res) => {
   try {
-    const tracking = await Tracking.find({ user: req.user._id });
-    
+    const tracking = await Tracking.find({ user: req.user._id }).lean();
+
     const stats = {
       total: tracking.length,
       solved: tracking.filter(t => t.isSolved).length,
