@@ -68,6 +68,15 @@ export const questionsAPI = {
     setCache('stats', response.data.data, 5);
     return response;
   },
+
+  // Cached: company counts (5 min TTL)
+  getCompanyStats: async () => {
+    const cached = getCache('companyStats');
+    if (cached) return { data: { success: true, data: { counts: cached } } };
+    const response = await api.get('/questions/company-stats');
+    setCache('companyStats', response.data.data.counts, 5);
+    return response;
+  },
 };
 
 // Tracking APIs with caching

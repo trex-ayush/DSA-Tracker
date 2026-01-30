@@ -32,10 +32,7 @@ const Home = () => {
   // Query: Company Counts
   const { data: companyCountsData, isLoading: loadingCounts } = useQuery({
     queryKey: ['companyCounts'],
-    queryFn: async () => {
-      const response = await fetch('/api/questions/company-stats');
-      return response.json();
-    },
+    queryFn: () => questionsAPI.getCompanyStats(),
     staleTime: 5 * 60 * 1000, // 5 mins
   });
 
