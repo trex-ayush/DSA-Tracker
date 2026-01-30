@@ -13,6 +13,7 @@ const Questions = lazy(() => import('./pages/Questions'));
 const Company = lazy(() => import('./pages/Company'));
 const Companies = lazy(() => import('./pages/Companies'));
 const Revise = lazy(() => import('./pages/Revise'));
+const Requests = lazy(() => import('./pages/Requests'));
 
 // Loading fallback component
 const PageLoader = () => (
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="/" element={<Home />} />
         <Route path="/companies" element={<Companies />} />
         <Route path="/questions" element={<Questions />} />
+        <Route path="/requests" element={<Requests />} />
         <Route path="/company/:companyName" element={<Company />} />
         <Route
           path="/dashboard"

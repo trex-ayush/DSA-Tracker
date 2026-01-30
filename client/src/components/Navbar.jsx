@@ -22,11 +22,10 @@ const Navbar = () => {
     <Link
       to={to}
       onClick={() => setMobileMenuOpen(false)}
-      className={`text-sm font-medium transition-colors relative py-1 ${
-        isActive(to)
-          ? 'text-black'
-          : 'text-neutral-500 hover:text-black'
-      }`}
+      className={`text-sm font-medium transition-colors relative py-1 ${isActive(to)
+        ? 'text-black'
+        : 'text-neutral-500 hover:text-black'
+        }`}
     >
       {children}
       {isActive(to) && (
@@ -52,6 +51,7 @@ const Navbar = () => {
             <NavLink to="/">Home</NavLink>
             <NavLink to="/questions">Questions</NavLink>
             <NavLink to="/companies">Companies</NavLink>
+            <NavLink to="/requests">Requests</NavLink>
             {user && <NavLink to="/dashboard">Dashboard</NavLink>}
             {user && <NavLink to="/revise">Revise</NavLink>}
             {user?.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
@@ -118,6 +118,9 @@ const Navbar = () => {
               </MobileNavLink>
               <MobileNavLink to="/companies" active={isActive('/companies')} onClick={() => setMobileMenuOpen(false)}>
                 Companies
+              </MobileNavLink>
+              <MobileNavLink to="/requests" active={isActive('/requests')} onClick={() => setMobileMenuOpen(false)}>
+                Requests
               </MobileNavLink>
               {user && (
                 <>
@@ -186,11 +189,10 @@ const MobileNavLink = ({ to, active, onClick, children }) => (
   <Link
     to={to}
     onClick={onClick}
-    className={`block px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-      active
-        ? 'bg-black text-white'
-        : 'text-neutral-600 hover:bg-neutral-100 hover:text-black'
-    }`}
+    className={`block px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${active
+      ? 'bg-black text-white'
+      : 'text-neutral-600 hover:bg-neutral-100 hover:text-black'
+      }`}
   >
     {children}
   </Link>
