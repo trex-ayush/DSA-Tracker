@@ -36,7 +36,7 @@ const Home = () => {
     staleTime: 5 * 60 * 1000, // 5 mins
   });
 
-  const companyCounts = companyCountsData?.success ? companyCountsData.data.counts : {};
+  const companyCounts = companyCountsData?.data?.success ? companyCountsData.data.data.counts : {};
 
   // Query: Stats
   const { data: statsData, isLoading: loadingStats } = useQuery({

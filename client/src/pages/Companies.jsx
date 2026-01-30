@@ -23,7 +23,7 @@ const Companies = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const companyCounts = companyCountsData?.success ? companyCountsData.data.counts : {};
+  const companyCounts = companyCountsData?.data?.success ? companyCountsData.data.data.counts : {};
   const loading = loadingCompanies || loadingCounts;
 
   const filteredCompanies = useMemo(() => {
