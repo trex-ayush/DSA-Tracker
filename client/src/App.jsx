@@ -9,6 +9,7 @@ import Admin from './pages/Admin';
 import Questions from './pages/Questions';
 import Company from './pages/Company';
 import Companies from './pages/Companies';
+import Revise from './pages/Revise';
 
 // Protected Route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -62,6 +63,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/revise" 
+          element={
+            <ProtectedRoute>
+              <Revise />
             </ProtectedRoute>
           } 
         />

@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { questionsAPI } from '../services/api';
+import { questionsAPI, trackingAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { 
-  Search, 
-  Loader2, 
-  ArrowLeft, 
-  X, 
+import {
+  Search,
+  Loader2,
+  ArrowLeft,
+  X,
   ExternalLink,
   ChevronLeft,
   ChevronRight,
   List,
+  Star,
+  CheckCircle,
+  Circle,
 } from 'lucide-react';
 
 const getDifficultyStyle = (difficulty) => {
@@ -51,6 +54,7 @@ const Questions = () => {
   const [loading, setLoading] = useState(true);
   const [allQuestions, setAllQuestions] = useState([]);
   const [stats, setStats] = useState({ easy: 0, medium: 0, hard: 0 });
+  const [trackingMap, setTrackingMap] = useState({});
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
@@ -72,12 +76,17 @@ const Questions = () => {
     fetchQuestions();
   }, [filters, pagination.page]);
 
+  useEffect(() => {
+    if (user) {
+      fetchUserTracking();
+    }
+  }, [user, questions]);
+
   const fetchAllQuestions = async () => {
     try {
       const response = await questionsAPI.getAll({ limit: 1000 });
       setAllQuestions(response.data.data || []);
-      
-      // Calculate stats from all questions
+
       const newStats = { easy: 0, medium: 0, hard: 0 };
       (response.data.data || []).forEach(q => {
         const diff = q.difficulty?.toLowerCase();
@@ -110,6 +119,23 @@ const Questions = () => {
     }
   };
 
+  const fetchUserTracking = async () => {
+    try {
+      const response = await trackingAPI.getAll({ limit: 1000 });
+      const tracking = response.data.data || [];
+      const newTrackingMap = {};
+      tracking.forEach(t => {
+        newTrackingMap[t.question?._id] = {
+          isSolved: t.isSolved,
+          isRevise: t.isRevise
+        };
+      });
+      setTrackingMap(newTrackingMap);
+    } catch (error) {
+      console.error('Error fetching user tracking:', error);
+    }
+  };
+
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setPagination(prev => ({ ...prev, page: 1 }));
@@ -125,12 +151,52 @@ const Questions = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
+  const handleSolvedToggle = async (questionId) => {
+    if (!user) {
+      window.location.href = '/login';
+      return;
+    }
+
+    const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
+    const newIsSolved = !currentTracking.isSolved;
+
+    try {
+      await trackingAPI.create(questionId, { isSolved: newIsSolved });
+      setTrackingMap(prev => ({
+        ...prev,
+        [questionId]: { ...currentTracking, isSolved: newIsSolved }
+      }));
+    } catch (error) {
+      console.error('Error updating solved status:', error);
+    }
+  };
+
+  const handleReviseToggle = async (questionId) => {
+    if (!user) {
+      window.location.href = '/login';
+      return;
+    }
+
+    const currentTracking = trackingMap[questionId] || { isSolved: false, isRevise: false };
+    const newIsRevise = !currentTracking.isRevise;
+
+    try {
+      await trackingAPI.create(questionId, { isRevise: newIsRevise });
+      setTrackingMap(prev => ({
+        ...prev,
+        [questionId]: { ...currentTracking, isRevise: newIsRevise }
+      }));
+    } catch (error) {
+      console.error('Error updating revise status:', error);
+    }
+  };
+
   const uniqueCompanies = [...new Set(allQuestions.flatMap(q => q.companies?.map(c => c.company) || []))].filter(Boolean).sort();
   const hasActiveFilters = filters.difficulty || filters.timeRange || filters.search || filters.company;
 
   return (
     <div className="bg-white">
-      
+
       <main className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Back Button */}
         <Link to="/">
@@ -155,7 +221,7 @@ const Questions = () => {
               </p>
             </div>
           </div>
-          
+
           {/* Stats Row */}
           <div className="flex gap-6 mt-6">
             <div className="flex items-center gap-2">
@@ -191,7 +257,7 @@ const Questions = () => {
                 onChange={(e) => handleFilterChange('search', e.target.value)}
               />
             </div>
-            
+
             <Select
               value={filters.company}
               onValueChange={(value) => handleFilterChange('company', value === 'all' ? '' : value)}
@@ -239,8 +305,8 @@ const Questions = () => {
             </Select>
 
             {hasActiveFilters && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={clearFilters}
                 className="border-gray-200"
               >
@@ -270,9 +336,9 @@ const Questions = () => {
               <p className="font-medium text-gray-900 mb-1">No questions found</p>
               <p className="text-sm text-gray-500">Try adjusting your filters</p>
               {hasActiveFilters && (
-                <Button 
-                  variant="outline" 
-                  onClick={clearFilters} 
+                <Button
+                  variant="outline"
+                  onClick={clearFilters}
                   className="mt-4"
                   size="sm"
                 >
@@ -287,6 +353,12 @@ const Questions = () => {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b bg-gray-50">
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        ✓
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        ★
+                      </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Title
                       </th>
@@ -295,9 +367,6 @@ const Questions = () => {
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Companies
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Topics
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                         Asked
@@ -308,130 +377,158 @@ const Questions = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {questions.map((question) => (
-                      <tr key={question._id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
+                    {questions.map((question) => {
+                      const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
+                      const trackingStatus = trackingData.isSolved ? 'solved' : (trackingData.isRevise ? 'revisiting' : 'unsolved');
+                      return (
+                        <tr key={question._id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-4 text-center">
+                            <button
+                              onClick={() => handleSolvedToggle(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                  ? 'text-green-500 hover:text-green-600'
+                                  : 'text-gray-300 hover:text-gray-400'
+                                }`}
+                              title={trackingData.isSolved ? 'Mark as unsolved' : 'Mark as solved'}
+                            >
+                              {trackingData.isSolved ? (
+                                <CheckCircle className="h-5 w-5" />
+                              ) : (
+                                <Circle className="h-5 w-5" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <button
+                              onClick={() => handleReviseToggle(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                  ? 'text-yellow-500 hover:text-yellow-600'
+                                  : 'text-gray-300 hover:text-gray-400'
+                                }`}
+                              title={trackingData.isRevise ? 'Remove from revise' : 'Add to revise'}
+                            >
+                              <Star className="h-5 w-5" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
+                            </button>
+                          </td>
+                          <td className="px-4 py-4">
                             <span className="font-medium text-gray-900">
                               {question.title}
                             </span>
-                            {question.trackingStatus === 'solved' && (
-                              <span className="text-green-500 text-xs">✓</span>
-                            )}
-                            {question.trackingStatus === 'revising' && (
-                              <span className="text-yellow-500 text-xs">↻</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className={`inline-flex px-2 py-1 rounded text-xs font-medium border ${getDifficultyStyle(question.difficulty)}`}>
-                            {question.difficulty}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex flex-wrap gap-1">
-                            {question.companies?.slice(0, 3).map((comp, idx) => (
-                              <span 
-                                key={idx} 
-                                className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
-                              >
-                                {comp.company}
-                              </span>
-                            ))}
-                            {question.companies?.length > 3 && (
-                              <span className="px-2 py-0.5 text-gray-400 text-xs">
-                                +{question.companies.length - 3}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex flex-wrap gap-1">
-                            {question.topics?.slice(0, 2).map((topic, idx) => (
-                              <span key={idx} className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">
-                                {topic}
-                              </span>
-                            ))}
-                            {question.topics?.length > 2 && (
-                              <span className="px-2 py-0.5 text-gray-400 text-xs">
-                                +{question.topics.length - 2}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex flex-col gap-1">
-                            {question.companies?.slice(0, 2).map((comp, idx) => (
-                              <span key={idx} className={`text-xs font-medium ${getTimeRangeStyle(comp.askedWithin)}`}>
-                                {comp.company}: {formatTimeRange(comp.askedWithin)}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4 text-center">
-                          <a
-                            href={question.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 text-gray-600 hover:text-black transition-colors"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-4 py-4">
+                            <span className={`inline-flex px-2 py-1 rounded text-xs font-medium border ${getDifficultyStyle(question.difficulty)}`}>
+                              {question.difficulty}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-1">
+                              {question.companies?.slice(0, 3).map((comp, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                                >
+                                  {comp.company}
+                                </span>
+                              ))}
+                              {question.companies?.length > 3 && (
+                                <span className="px-2 py-0.5 text-gray-400 text-xs">
+                                  +{question.companies.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-1">
+                              {question.companies?.slice(0, 2).map((comp, idx) => (
+                                <span key={idx} className={`text-xs font-medium ${getTimeRangeStyle(comp.askedWithin)}`}>
+                                  {comp.company}: {formatTimeRange(comp.askedWithin)}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <a
+                              href={question.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 text-gray-600 hover:text-black transition-colors"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               {/* Mobile List */}
               <div className="md:hidden divide-y">
-                {questions.map((question) => (
-                  <div key={question._id} className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${getDifficultyStyle(question.difficulty)}`}>
-                            {question.difficulty}
-                          </span>
-                        </div>
-                        <h3 className="font-medium text-gray-900 mb-2">
-                          {question.title}
-                        </h3>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {question.companies?.slice(0, 3).map((comp, idx) => (
-                            <span 
-                              key={idx} 
-                              className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                {questions.map((question) => {
+                  const trackingData = trackingMap[question._id] || { isSolved: false, isRevise: false };
+                  return (
+                    <div key={question._id} className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <button
+                              onClick={() => handleSolvedToggle(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isSolved
+                                  ? 'text-green-500'
+                                  : 'text-gray-300'
+                                }`}
                             >
-                              {comp.company}
+                              {trackingData.isSolved ? (
+                                <CheckCircle className="h-4 w-4" />
+                              ) : (
+                                <Circle className="h-4 w-4" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleReviseToggle(question._id)}
+                              className={`p-1 rounded-md transition-colors ${trackingData.isRevise
+                                  ? 'text-yellow-500'
+                                  : 'text-gray-300'
+                                }`}
+                            >
+                              <Star className="h-4 w-4" fill={trackingData.isRevise ? 'currentColor' : 'none'} />
+                            </button>
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${getDifficultyStyle(question.difficulty)}`}>
+                              {question.difficulty}
                             </span>
-                          ))}
-                          {question.companies?.length > 3 && (
-                            <span className="text-xs text-gray-400">
-                              +{question.companies.length - 3}
-                            </span>
-                          )}
+                          </div>
+                          <h3 className="font-medium text-gray-900 mb-2">
+                            {question.title}
+                          </h3>
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {question.companies?.slice(0, 3).map((comp, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                              >
+                                {comp.company}
+                              </span>
+                            ))}
+                            {question.companies?.length > 3 && (
+                              <span className="text-xs text-gray-400">
+                                +{question.companies.length - 3}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {question.topics?.slice(0, 2).map((topic, idx) => (
-                            <span key={idx} className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">
-                              {topic}
-                            </span>
-                          ))}
-                        </div>
+                        <a
+                          href={question.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-shrink-0 p-2 hover:bg-gray-100 rounded-md text-gray-600"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
                       </div>
-                      <a
-                        href={question.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-shrink-0 p-2 hover:bg-gray-100 rounded-md text-gray-600"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
