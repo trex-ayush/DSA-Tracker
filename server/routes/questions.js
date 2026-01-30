@@ -85,7 +85,8 @@ router.get('/', optionalAuth, async (req, res) => {
     const questions = await Question.find(query)
       .sort({ 'companies.lastAskedDate': -1, createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
     // Get total count for pagination
     const total = await Question.countDocuments(query);
@@ -94,7 +95,7 @@ router.get('/', optionalAuth, async (req, res) => {
     const questionsWithTracking = questions.map(q => {
       const tracking = userTracking[q._id.toString()];
       return {
-        ...q.toObject(),
+        ...q,
         trackingStatus: tracking ? tracking.status : null,
         userNotes: tracking ? tracking.notes : null
       };
@@ -148,19 +149,21 @@ router.get('/company-stats', async (req, res) => {
     const companies = await Question.aggregate([
       { $match: { isActive: true } },
       { $unwind: '$companies' },
-      { $group: { 
-        _id: '$companies.company', 
-        count: { $sum: 1 },
-        companyData: { $push: '$companies' }
-      }},
+      {
+        $group: {
+          _id: '$companies.company',
+          count: { $sum: 1 },
+          companyData: { $push: '$companies' }
+        }
+      },
       { $sort: { count: -1 } }
     ]);
-    
+
     const companyCounts = {};
     companies.forEach(c => {
       companyCounts[c._id] = c.count;
     });
-    
+
     res.json({
       success: true,
       data: {

@@ -1,22 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { questionsAPI } from '../services/api';
 
 const Home = () => {
   const navigate = useNavigate();
-  const [companies, setCompanies] = useState([]);
-  const [companyCounts, setCompanyCounts] = useState({});
-  const [stats, setStats] = useState(null);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [searchFocused, setSearchFocused] = useState(false);
   const searchRef = useRef(null);
-
-  useEffect(() => {
-    fetchCompanies();
-    fetchCompanyCounts();
-    fetchStats();
-  }, []);
 
   // Close search dropdown when clicking outside
   useEffect(() => {
@@ -29,41 +20,42 @@ const Home = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const fetchCompanies = async () => {
-    try {
-      const response = await questionsAPI.getCompanies();
-      setCompanies(response.data.data);
-    } catch (error) {
-      console.error('Error fetching companies:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Query: Companies
+  const { data: companiesData } = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => questionsAPI.getCompanies(),
+    staleTime: 60 * 60 * 1000, // 60 mins
+  });
 
-  const fetchCompanyCounts = async () => {
-    try {
+  const companies = companiesData?.data?.data || [];
+
+  // Query: Company Counts
+  const { data: companyCountsData, isLoading: loadingCounts } = useQuery({
+    queryKey: ['companyCounts'],
+    queryFn: async () => {
       const response = await fetch('/api/questions/company-stats');
-      const data = await response.json();
-      if (data.success) {
-        setCompanyCounts(data.data.counts || {});
-      }
-    } catch (error) {
-      console.error('Error fetching company counts:', error);
-    }
-  };
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000, // 5 mins
+  });
 
-  const fetchStats = async () => {
-    try {
-      const response = await questionsAPI.getStats();
-      setStats(response.data.data);
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
+  const companyCounts = companyCountsData?.success ? companyCountsData.data.counts : {};
 
-  const filteredCompanies = companies
-    .filter(c => c.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (companyCounts[b] || 0) - (companyCounts[a] || 0));
+  // Query: Stats
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['questionsStats'],
+    queryFn: () => questionsAPI.getStats(),
+    staleTime: 5 * 60 * 1000, // 5 mins
+  });
+
+  const stats = statsData?.data?.data;
+  const loading = loadingCounts || loadingStats;
+
+  const filteredCompanies = useMemo(() => {
+    return companies
+      .filter(c => c.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => (companyCounts[b] || 0) - (companyCounts[a] || 0));
+  }, [companies, search, companyCounts]);
 
   const total = stats ? (stats.byDifficulty?.Easy || 0) + (stats.byDifficulty?.Medium || 0) + (stats.byDifficulty?.Hard || 0) : 0;
 
@@ -77,13 +69,17 @@ const Home = () => {
     'Google': 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Google_2015_logo.svg/1200px-Google_2015_logo.svg.png'
   };
 
-  const faangData = faangCompanies.map(name => ({
-    name,
-    count: companyCounts[name] || 0,
-    logoUrl: companyLogos[name]
-  })).filter(c => c.count > 0);
+  const faangData = useMemo(() => {
+    return faangCompanies.map(name => ({
+      name,
+      count: companyCounts[name] || 0,
+      logoUrl: companyLogos[name]
+    })).filter(c => c.count > 0);
+  }, [companyCounts]); // faangCompanies and companyLogos are constant/external, okay to omit or include if memoized
 
-  const otherCompanies = filteredCompanies.filter(c => !faangCompanies.includes(c));
+  const otherCompanies = useMemo(() => {
+    return filteredCompanies.filter(c => !faangCompanies.includes(c));
+  }, [filteredCompanies]);
 
   const maxDifficulty = Math.max(
     stats?.byDifficulty?.Easy || 1,
@@ -99,7 +95,7 @@ const Home = () => {
 
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
-          
+
           {/* Hero + Search Section */}
           <div className="text-center mb-12">
             <h1 className="text-4xl md:text-5xl font-bold text-black mb-3 tracking-tight">
@@ -126,7 +122,7 @@ const Home = () => {
                   onFocus={() => setSearchFocused(true)}
                 />
                 {search && (
-                  <button 
+                  <button
                     className="absolute inset-y-0 right-0 pr-5 flex items-center"
                     onClick={() => setSearch('')}
                   >
@@ -225,8 +221,8 @@ const Home = () => {
                     onClick={() => navigate(`/company/${encodeURIComponent(company.name)}`)}
                   >
                     <div className="flex justify-center mb-4 h-10">
-                      <img 
-                        src={company.logoUrl} 
+                      <img
+                        src={company.logoUrl}
                         alt={company.name}
                         className="h-full w-auto object-contain"
                       />
@@ -256,8 +252,8 @@ const Home = () => {
               </button>
             </div>
             <div className="h-px bg-neutral-200 mb-6"></div>
-            
-            {loading ? (
+
+            {loading && !companies.length ? (
               <div className="flex items-center justify-center py-16">
                 <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
               </div>

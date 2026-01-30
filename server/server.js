@@ -1,10 +1,14 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
+
+// Gzip compression for all responses
+app.use(compression());
 
 // Middleware
 // Middleware

@@ -5,9 +5,11 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Loader2, Upload, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 
 const Admin = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [file, setFile] = useState(null);
   const [company, setCompany] = useState('');
   const [askedIn, setAskedIn] = useState('30days');
@@ -64,6 +66,14 @@ const Admin = () => {
           text: `Upload successful! Created: ${data.data.created}, Updated: ${data.data.updated}, Errors: ${data.data.errors}`
         });
         setFile(null);
+
+        // Invalidate caches to ensure freshness
+        queryClient.invalidateQueries({ queryKey: ['companies'] }); // Refresh Home/Companies list
+        queryClient.invalidateQueries({ queryKey: ['companyCounts'] }); // Refresh counts
+        queryClient.invalidateQueries({ queryKey: ['questionsStats'] }); // Refresh global stats
+        queryClient.invalidateQueries({ queryKey: ['questions'] }); // Refresh Questions list
+        queryClient.invalidateQueries({ queryKey: ['company', company] }); // Refresh specific Company page
+
       } else {
         setError(data.message || 'Upload failed');
       }
@@ -95,7 +105,7 @@ const Admin = () => {
 
   return (
     <div className="bg-gray-50">
-      
+
       <main className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold mb-8">Admin Dashboard</h1>
 
@@ -166,9 +176,9 @@ const Admin = () => {
                   </div>
                 )}
 
-                <Button 
-                  type="submit" 
-                  className="w-full" 
+                <Button
+                  type="submit"
+                  className="w-full"
                   disabled={loading || !file || !company}
                 >
                   {loading ? (
@@ -210,7 +220,7 @@ const Admin = () => {
                   <h4 className="font-medium mb-2">How it works:</h4>
                   <ol className="text-sm space-y-2 text-muted-foreground list-decimal list-inside">
                     <li>Enter the <strong>Company Name</strong> (e.g., Google)</li>
-                    <li>Select the <strong>Time Range</strong> for "Asked In"</li>
+                    <li>Select the <strong>Time Range</strong> (Asked In)</li>
                     <li>Upload the CSV file with question data</li>
                     <li>All questions will be associated with the selected company and time range</li>
                   </ol>
@@ -219,7 +229,7 @@ const Admin = () => {
                 <div>
                   <h4 className="font-medium mb-2">Example CSV:</h4>
                   <pre className="bg-gray-100 p-3 rounded-md text-xs overflow-x-auto">
-{`ID,URL,Title,Difficulty,Acceptance %,Frequency %
+                    {`ID,URL,Title,Difficulty,Acceptance %,Frequency %
 1,https://leetcode.com/problems/two-sum,Two Sum,Easy,49.2,5
 2,https://leetcode.com/problems/longest-substring,Longest Substring,Medium,32.1,3
 3,https://leetcode.com/problems/median,Median of Two Sorted Arrays,Hard,29.8,2`}
