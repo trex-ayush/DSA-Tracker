@@ -3,12 +3,19 @@ const router = express.Router();
 const Request = require('../models/Request');
 const { protect, adminOnly } = require('../middleware/auth');
 
-// @desc    Get all requests
+// @desc    Get all requests (Admin) or User's requests
 // @route   GET /api/requests
-// @access  Public
-router.get('/', async (req, res) => {
+// @access  Private
+router.get('/', protect, async (req, res) => {
     try {
-        const requests = await Request.find()
+        let query = {};
+
+        // If not admin, only show own requests
+        if (req.user.role !== 'admin') {
+            query = { user: req.user.id };
+        }
+
+        const requests = await Request.find(query)
             .populate('user', 'name email') // Populate name and email
             .populate('messages.sender', 'name role') // Populate sender details in messages
             .sort({ createdAt: -1 });

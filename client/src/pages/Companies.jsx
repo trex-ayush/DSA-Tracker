@@ -7,24 +7,31 @@ const Companies = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
 
-  // Query: Companies (Shared with Home.jsx)
-  const { data: companiesData, isLoading: loadingCompanies } = useQuery({
-    queryKey: ['companies'],
-    queryFn: () => questionsAPI.getCompanies(),
-    staleTime: 60 * 60 * 1000,
-  });
-
-  const companies = companiesData?.data?.data || [];
-
-  // Query: Company Counts (Shared with Home.jsx)
-  const { data: companyCountsData, isLoading: loadingCounts } = useQuery({
-    queryKey: ['companyCounts'],
+  // Query: Company Stats (Single Source of Truth)
+  const { data: statsData, isLoading } = useQuery({
+    queryKey: ['companyStats'],
     queryFn: () => questionsAPI.getCompanyStats(),
     staleTime: 5 * 60 * 1000,
   });
 
-  const companyCounts = companyCountsData?.data?.success ? companyCountsData.data.data.counts : {};
-  const loading = loadingCompanies || loadingCounts;
+  const rawData = statsData?.data?.data || {};
+
+  // Handle both old format (with .companies and .counts) and new format (just .companies array)
+  // New backend will likely return { companies: [{name, count}, ...] }
+  // Old backend returned { companies: [...], counts: {...} }
+
+  const companiesList = rawData.companies || [];
+
+  // Derive counts map client-side
+  const companyCounts = useMemo(() => {
+    const counts = {};
+    companiesList.forEach(c => {
+      counts[c.name] = c.count;
+    });
+    return counts;
+  }, [companiesList]);
+
+  const companies = useMemo(() => companiesList.map(c => c.name).sort(), [companiesList]);
 
   const filteredCompanies = useMemo(() => {
     return companies
@@ -64,7 +71,7 @@ const Companies = () => {
           </div>
 
           {/* Companies Grid */}
-          {loading ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-16">
               <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
             </div>
@@ -95,7 +102,7 @@ const Companies = () => {
             </div>
           )}
 
-          {filteredCompanies.length === 0 && !loading && (
+          {filteredCompanies.length === 0 && !isLoading && (
             <div className="text-center py-16 text-neutral-500">
               No companies found for "{search}"
             </div>
