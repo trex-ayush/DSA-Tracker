@@ -5,6 +5,7 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 const Question = require('../models/Question');
+const Metadata = require('../models/Metadata');
 const { protect, adminOnly } = require('../middleware/auth');
 
 // Ensure uploads directory exists
@@ -39,7 +40,7 @@ router.post('/upload', protect, adminOnly, upload.single('file'), async (req, re
 
     // Get company and askedIn from form data
     const { company, askedIn } = req.body;
-    
+
     if (!company || !askedIn) {
       return res.status(400).json({
         success: false,
@@ -52,7 +53,7 @@ router.post('/upload', protect, adminOnly, upload.single('file'), async (req, re
 
     // Read and parse CSV
     const stream = fs.createReadStream(filePath);
-    
+
     await new Promise((resolve, reject) => {
       stream
         .pipe(csv())
@@ -93,55 +94,110 @@ router.post('/upload', protect, adminOnly, upload.single('file'), async (req, re
       }
     }
 
-    // Upsert questions
-    let created = 0;
-    let updated = 0;
+    // Optimized: Use bulkWrite for performance
+    const operations = [];
+
+    // Fetch potentially matching questions
+    const titles = questions.map(q => q.title);
+    const existingQuestions = await Question.find({
+      title: { $in: titles }
+    }).select('title link companies');
+
+    const existingMap = new Map();
+    existingQuestions.forEach(q => existingMap.set(q.title + '|' + q.link, q)); // Key by title+link
+
+    let createdCount = 0;
+    let updatedCount = 0;
 
     for (const q of questions) {
-      const existing = await Question.findOne({ title: q.title, link: q.link });
-      
+      const key = q.title + '|' + q.link;
+      const existing = existingMap.get(key);
+
       if (existing) {
-        // Only update fields if they have meaningful values
-        if (q.difficulty) existing.difficulty = q.difficulty;
-        if (q.topics && q.topics.length > 0) existing.topics = q.topics;
-        if (q.acceptanceRate > 0) existing.acceptanceRate = q.acceptanceRate;
-        if (q.link) existing.link = q.link;
-        
-        // Always add new companies (don't replace existing ones)
-        // This ensures multiple companies can tag the same question
-        for (const newCompany of q.companies) {
-          const companyExists = existing.companies.some(
-            c => c.company.toLowerCase() === newCompany.company.toLowerCase()
-          );
-          
-          if (!companyExists) {
-            existing.companies.push(newCompany);
-          }
+        // Prepare update operation
+        const updateFields = {};
+        // Only update if value is present and valid
+        if (q.difficulty) updateFields.difficulty = q.difficulty;
+        if (q.topics && q.topics.length > 0) updateFields.topics = q.topics;
+        if (q.acceptanceRate > 0) updateFields.acceptanceRate = q.acceptanceRate;
+        if (q.link) updateFields.link = q.link;
+        if (q.frequency > 0) updateFields.frequency = q.frequency;
+
+        // Check for new companies to add
+        // existing.companies is an array of objects { company, askedWithin, ... }
+        // We want to add q.companies[0] if it doesn't exist (by name)
+
+        const newCompanies = q.companies.filter(nc =>
+          !existing.companies.some(ec => ec.company.toLowerCase() === nc.company.toLowerCase())
+        );
+
+        if (newCompanies.length > 0) {
+          operations.push({
+            updateOne: {
+              filter: { _id: existing._id },
+              update: {
+                $set: updateFields,
+                $push: { companies: { $each: newCompanies } }
+              }
+            }
+          });
+          updatedCount++;
+        } else if (Object.keys(updateFields).length > 0) {
+          operations.push({
+            updateOne: {
+              filter: { _id: existing._id },
+              update: { $set: updateFields }
+            }
+          });
+          updatedCount++;
         }
-        
-        await existing.save();
-        updated++;
       } else {
-        // Create new question
-        await Question.create(q);
-        created++;
+        // Insert operation
+        operations.push({
+          insertOne: {
+            document: q
+          }
+        });
+        createdCount++;
       }
     }
 
+    if (operations.length > 0) {
+      await Question.bulkWrite(operations);
+
+      // Update system metadata
+      await Metadata.findOneAndUpdate(
+        { key: 'questions_last_updated' },
+        { value: Date.now(), updatedAt: Date.now() },
+        { upsert: true, new: true }
+      );
+    }
+
     // Clean up uploaded file
-    fs.unlinkSync(filePath);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (e) {
+      console.error('Error deleting file:', e);
+    }
 
     res.json({
       success: true,
       data: {
-        created,
-        updated,
+        created: createdCount,
+        updated: updatedCount,
         errors: errors.length,
         details: errors
       }
     });
   } catch (error) {
     console.error('CSV upload error:', error);
+    // Cleanup file if error
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) { }
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error processing CSV file',
@@ -187,7 +243,7 @@ router.get('/stats', protect, adminOnly, async (req, res) => {
   try {
     const stats = {
       totalQuestions: await Question.countDocuments(),
-      totalUsers: require('../models/User').countDocuments(),
+      totalUsers: await require('../models/User').countDocuments(),
       questionsByDifficulty: {
         Easy: await Question.countDocuments({ difficulty: 'Easy' }),
         Medium: await Question.countDocuments({ difficulty: 'Medium' }),
