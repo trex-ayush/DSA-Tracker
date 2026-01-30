@@ -136,26 +136,6 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
-// @route   GET /api/questions/companies
-// @desc    Get all unique companies
-// @access  Public
-router.get('/companies', async (req, res) => {
-  try {
-    const companies = await Question.distinct('companies.company');
-    res.json({
-      success: true,
-      data: companies.filter(c => c).sort()
-    });
-  } catch (error) {
-    console.error('Get companies error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching companies',
-      error: error.message
-    });
-  }
-});
-
 // @route   GET /api/questions/company-stats
 // @desc    Get all companies with their question counts
 // @access  Public
@@ -174,16 +154,12 @@ router.get('/company-stats', async (req, res) => {
       { $sort: { count: -1 } }
     ]);
 
-    const companyCounts = {};
-    companies.forEach(c => {
-      companyCounts[c._id] = c.count;
-    });
-
+    // Simplified response: Just the array.
+    // Client can derive lookup maps if needed.
     res.json({
       success: true,
       data: {
-        companies: companies.map(c => ({ name: c._id, count: c.count })),
-        counts: companyCounts
+        companies: companies.map(c => ({ name: c._id, count: c.count }))
       }
     });
   } catch (error) {

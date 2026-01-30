@@ -42,15 +42,6 @@ export const questionsAPI = {
   getAll: (params) => api.get('/questions', { params }),
   getById: (id) => api.get(`/questions/${id}`),
 
-  // Cached: companies list (60 min TTL)
-  getCompanies: async () => {
-    const cached = getCache('companies');
-    if (cached) return { data: { success: true, data: cached } };
-    const response = await api.get('/questions/companies');
-    setCache('companies', response.data.data, 60);
-    return response;
-  },
-
   // Cached: topics list (60 min TTL)
   getTopics: async () => {
     const cached = getCache('topics');
