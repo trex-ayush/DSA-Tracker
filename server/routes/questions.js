@@ -1,8 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const Question = require('../models/Question');
-const Tracking = require('../models/Tracking');
+const Metadata = require('../models/Metadata');
 const { optionalAuth, protect, adminOnly } = require('../middleware/auth');
+
+// @route   GET /api/questions/metadata
+// @desc    Get system metadata (e.g. last updated time)
+// @access  Public
+router.get('/metadata', async (req, res) => {
+  try {
+    const meta = await Metadata.findOne({ key: 'questions_last_updated' });
+    res.status(200).json({
+      success: true,
+      lastUpdated: meta ? meta.value : 0
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+});
 
 // @route   GET /api/questions
 // @desc    Get all questions with filters
@@ -196,6 +211,95 @@ router.get('/topics', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching topics',
+      error: error.message
+    });
+  }
+});
+
+// @route   GET /api/questions/home-stats
+// @desc    Get optimized stats for home page (Total, Difficulty, FAANG, Top 12)
+// @access  Public
+router.get('/home-stats', async (req, res) => {
+  try {
+    const pipeline = [
+      { $match: { isActive: true } },
+      {
+        $facet: {
+          // 1. Difficulty Stats
+          difficultyStats: [
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                easy: { $sum: { $cond: [{ $eq: ["$difficulty", "Easy"] }, 1, 0] } },
+                medium: { $sum: { $cond: [{ $eq: ["$difficulty", "Medium"] }, 1, 0] } },
+                hard: { $sum: { $cond: [{ $eq: ["$difficulty", "Hard"] }, 1, 0] } }
+              }
+            }
+          ],
+          // 2. Company Counts (to derive FAANG and Top 12)
+          companyCounts: [
+            { $unwind: "$companies" },
+            {
+              $group: {
+                _id: "$companies.company",
+                count: { $sum: 1 }
+              }
+            },
+            { $sort: { count: -1 } }
+          ]
+        }
+      }
+    ];
+
+    const results = await Question.aggregate(pipeline);
+    const stats = results[0].difficultyStats[0] || { total: 0, easy: 0, medium: 0, hard: 0 };
+    const allCompanies = results[0].companyCounts || [];
+
+    // FAANG Logic
+    const faangNames = ['Meta', 'Apple', 'Amazon', 'Netflix', 'Google'];
+    const faangMap = {};
+    // Pre-fill with 0
+    faangNames.forEach(f => faangMap[f] = 0);
+
+    // Populate FAANG counts from allCompanies (lookup)
+    allCompanies.forEach(c => {
+      if (faangNames.includes(c._id)) {
+        faangMap[c._id] = c.count;
+      }
+    });
+
+    const faangData = faangNames.map(name => ({
+      name,
+      count: faangMap[name] || 0
+    }));
+
+    // Top 12 Logic (Excluding FAANG)
+    const topCompanies = allCompanies
+      .filter(c => !faangNames.includes(c._id)) // Exclude FAANG
+      .slice(0, 12) // Take top 12 remaining
+      .map(c => ({
+        name: c._id,
+        count: c.count
+      }));
+
+    res.json({
+      success: true,
+      data: {
+        total: stats.total,
+        easy: stats.easy,
+        medium: stats.medium,
+        hard: stats.hard,
+        faang: faangData,
+        topCompanies
+      }
+    });
+
+  } catch (error) {
+    console.error('Home stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching home stats',
       error: error.message
     });
   }

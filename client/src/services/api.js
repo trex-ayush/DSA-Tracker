@@ -60,6 +60,15 @@ export const questionsAPI = {
     return response;
   },
 
+  // Cached: home stats (5 min TTL)
+  getHomeStats: async () => {
+    const cached = getCache('homeStats');
+    if (cached) return { data: { success: true, data: cached } };
+    const response = await api.get('/questions/home-stats');
+    setCache('homeStats', response.data.data, 5);
+    return response;
+  },
+
   // Cached: stats (5 min TTL)
   getStats: async () => {
     const cached = getCache('stats');
