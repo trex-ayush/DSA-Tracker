@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { questionsAPI } from '../services/api';
-import Navbar from '../components/Navbar';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -96,8 +95,7 @@ const Home = () => {
   const showSearchDropdown = searchFocused && search.length > 0;
 
   return (
-    <div className="min-h-screen bg-white">
-      <Navbar />
+    <div className="bg-white">
 
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">

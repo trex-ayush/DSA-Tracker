@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import Navbar from '../components/Navbar';
 import { trackingAPI } from '../services/api';
 import { Loader2, CheckCircle, Circle, RotateCcw, ExternalLink, TrendingUp, Target, Award } from 'lucide-react';
 
@@ -45,8 +44,7 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
-        <Navbar />
+      <div className="bg-white">
         <div className="flex justify-center items-center py-24">
           <Loader2 className="h-8 w-8 animate-spin text-black" />
         </div>
@@ -61,8 +59,7 @@ const Dashboard = () => {
   const progressPercentage = totalTracked > 0 ? Math.round((totalSolved / totalTracked) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <Navbar />
+    <div className="bg-white">
       
       <main className="container mx-auto px-4 py-8">
         {/* Header */}

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { questionsAPI } from '../services/api';
-import Navbar from '../components/Navbar';
 
 const Companies = () => {
   const navigate = useNavigate();
@@ -43,8 +42,7 @@ const Companies = () => {
     .sort((a, b) => (companyCounts[b] || 0) - (companyCounts[a] || 0));
 
   return (
-    <div className="min-h-screen bg-white">
-      <Navbar />
+    <div className="bg-white">
 
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
