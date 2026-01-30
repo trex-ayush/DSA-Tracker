@@ -267,7 +267,8 @@ router.get('/home-stats', async (req, res) => {
         medium: stats.medium,
         hard: stats.hard,
         faang: faangData,
-        topCompanies
+        topCompanies,
+        totalCompanies: allCompanies.length
       }
     });
 
@@ -387,6 +388,15 @@ router.post('/', protect, adminOnly, async (req, res) => {
   try {
     const question = await Question.create(req.body);
 
+    // Update metadata for cache invalidation
+    console.log('Updating questions_last_updated metadata...');
+    await Metadata.findOneAndUpdate(
+      { key: 'questions_last_updated' },
+      { value: Date.now() },
+      { upsert: true }
+    );
+    console.log('Metadata updated.');
+
     res.status(201).json({
       success: true,
       data: question
@@ -449,6 +459,13 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
 
     // Also delete associated tracking records
     await Tracking.deleteMany({ question: req.params.id });
+
+    // Update metadata for cache invalidation
+    await Metadata.findOneAndUpdate(
+      { key: 'questions_last_updated' },
+      { value: Date.now() },
+      { upsert: true }
+    );
 
     res.json({
       success: true,

@@ -28,7 +28,7 @@ const Home = () => {
   });
 
   const stats = homeStatsData?.data?.data || {};
-  const { total = 0, easy = 0, medium = 0, hard = 0, faang = [], topCompanies = [] } = stats;
+  const { total = 0, easy = 0, medium = 0, hard = 0, faang = [], topCompanies = [], totalCompanies = 0 } = stats;
 
   const companyLogos = {
     'Meta': 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Meta-Logo.png/1200px-Meta-Logo.png',
@@ -172,7 +172,7 @@ const Home = () => {
           {/* Stats Row */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-12">
             <div className="bg-black text-white rounded-2xl p-5 text-center">
-              <div className="text-2xl font-bold">{topCompanies.length + faang.length}</div>
+              <div className="text-2xl font-bold">{totalCompanies || (topCompanies.length + faang.length)}</div>
               <div className="text-neutral-400 text-xs mt-1 uppercase tracking-wide">Companies</div>
             </div>
             <div className="bg-neutral-100 rounded-2xl p-5 text-center">

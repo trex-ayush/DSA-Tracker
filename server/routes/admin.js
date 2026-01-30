@@ -163,14 +163,19 @@ router.post('/upload', protect, adminOnly, upload.single('file'), async (req, re
     }
 
     if (operations.length > 0) {
+      console.log(`Executing ${operations.length} bulk write operations...`);
       await Question.bulkWrite(operations);
 
       // Update system metadata
+      console.log('Updating metadata from CSV Upload...');
       await Metadata.findOneAndUpdate(
         { key: 'questions_last_updated' },
         { value: Date.now(), updatedAt: Date.now() },
         { upsert: true, new: true }
       );
+      console.log('Metadata updated successfully.');
+    } else {
+      console.log('No operations to perform (no new data).');
     }
 
     // Clean up uploaded file
@@ -221,6 +226,14 @@ router.post('/questions', protect, adminOnly, async (req, res) => {
     }
 
     const results = await Question.insertMany(questions, { ordered: false });
+
+    // Update system metadata
+    await Metadata.findOneAndUpdate(
+      { key: 'questions_last_updated' },
+      { value: Date.now(), updatedAt: Date.now() },
+      { upsert: true, new: true }
+    );
+    console.log('Bulk questions created, metadata updated.');
 
     res.status(201).json({
       success: true,

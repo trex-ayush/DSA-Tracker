@@ -21,6 +21,8 @@ const Layout = () => {
         // Check local last sync time
         const localLastSync = localStorage.getItem('dsa_last_sync');
 
+        console.log('[Cache Check]', { serverLastUpdated, localLastSync, diff: serverLastUpdated - (parseInt(localLastSync) || 0) });
+
         // If never synced, or server is newer -> Clear Cache
         if (!localLastSync || serverLastUpdated > parseInt(localLastSync)) {
           console.log('Server data is newer. Clearing cache...');
