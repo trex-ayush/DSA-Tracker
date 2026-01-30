@@ -21,18 +21,13 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const connectDB = async () => {
   try {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017dsa-tracking';
-    
-    // Check if MongoDB is available (for development without MongoDB)
-    if (process.env.SKIP_DB === 'true') {
-      console.log('⚠️  MongoDB connection skipped (SKIP_DB=true)');
-      return;
-    }
-    
+
+
     const conn = await mongoose.connect(mongoUri);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`MongoDB Error: ${error.message}`);
-    console.log('💡 Make sure MongoDB is running or set SKIP_DB=true in .env for basic testing');
+    console.log('💡 Make sure MongoDB is running');
     // Don't exit - allow server to run for static file serving
   }
 };
